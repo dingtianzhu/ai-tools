@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6abdcce806cc873ce69b3b00ceec74b31ed4a7ae3868a06f96ac485d6ac04e06 # shrinks to message = Message { id: "--a0--a-", session_id: "test-session-prop17", role: "user", content: "", timestamp: 9223372036854775808, metadata: None }
+cc 5d7463cb1fc25ed9674c743ff2b7bf4591d059c4f84e75947282e593db29fdc4 # shrinks to search_term = "aaa", matching_messages = [("a0a-a-aa", "user", 0)], non_matching_messages = []
+cc 62aa2b09d98d0a7d54c3aed78abae32f307b2209365ebb02136fcb3348d4db4e # shrinks to session = Session { id: "0-0000-0", project_id: "-a0-aaa0", runtime_id: "a0aa-0-a", title: "", created_at: 0, updated_at: 9223372036854775808, tags: None }, messages = []

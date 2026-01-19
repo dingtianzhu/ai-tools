@@ -31,6 +31,15 @@ pub enum AppError {
     #[error("MCP error: {0}")]
     McpError(String),
 
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
+    #[error("Secure storage error: {0}")]
+    SecureStorageError(String),
+
+    #[error("Credential not found: {0}")]
+    CredentialNotFound(String),
+
     #[error("Unknown error: {0}")]
     Unknown(String),
 }
@@ -48,6 +57,12 @@ impl From<std::io::Error> for AppError {
 impl From<serde_json::Error> for AppError {
     fn from(err: serde_json::Error) -> Self {
         AppError::SerializationError(err.to_string())
+    }
+}
+
+impl From<rusqlite::Error> for AppError {
+    fn from(err: rusqlite::Error) -> Self {
+        AppError::DatabaseError(err.to_string())
     }
 }
 

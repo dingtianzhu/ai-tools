@@ -5,6 +5,7 @@ export interface Project {
   path: string;
   lastOpened: number;
   aiToolsUsed: string[];
+  gitignoreRules?: string[];
 }
 
 export interface FileTreeNode {
@@ -39,6 +40,15 @@ export interface Message {
   content: string;
   timestamp: number;
   metadata?: Record<string, unknown>;
+}
+
+export interface SearchResult {
+  sessionId: string;
+  messageId: string;
+  content: string;
+  timestamp: number;
+  highlight: string;
+  session?: Session;
 }
 
 // Tool types

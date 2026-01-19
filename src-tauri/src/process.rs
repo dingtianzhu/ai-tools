@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader};
+use std::thread;
 
 use crate::error::AppError;
 
@@ -110,12 +113,233 @@ pub fn get_process_output(pid: u32) -> Result<String, String> {
 }
 
 /// Generate a unique PID (placeholder implementation)
-fn generate_pid() -> u32 {
+pub(crate) fn generate_pid() -> u32 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
     (duration.as_nanos() % u32::MAX as u128) as u32
+}
+
+/// Start a runtime process
+#[tauri::command]
+pub async fn start_runtime(
+    runtime_id: String,
+    executable_path: String,
+    args: Vec<String>,
+    working_dir: Option<String>,
+) -> Result<u32, String> {
+    // Parse runtime type from ID
+    let parts: Vec<&str> = runtime_id.split('_').collect();
+    if parts.is_empty() {
+        return Err("Invalid runtime ID".to_string());
+    }
+
+    let runtime_type = parts[0];
+
+    match runtime_type {
+        "ollama" => start_ollama_runtime().await,
+        "localai" => start_localai_runtime().await,
+        "docker" => {
+            if parts.len() >= 2 {
+                start_docker_runtime(parts[1]).await
+            } else {
+                Err("Invalid Docker runtime ID".to_string())
+            }
+        }
+        _ => {
+            // Generic process start
+            start_generic_runtime(executable_path, args, working_dir).await
+        }
+    }
+}
+
+/// Start Ollama runtime
+async fn start_ollama_runtime() -> Result<u32, String> {
+    let output = Command::new("ollama")
+        .arg("serve")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start Ollama: {}", e))?;
+
+    let pid = output.id();
+    
+    // Store process info
+    let process_info = ProcessInfo {
+        pid,
+        tool_id: "ollama".to_string(),
+        working_dir: String::new(),
+        status: ProcessStatus::Running,
+    };
+
+    let mut registry = process_registry().lock().map_err(|e| e.to_string())?;
+    registry.insert(pid, process_info);
+
+    // Capture output in background
+    if let Some(stdout) = output.stdout {
+        let output_buffer = Arc::clone(&Arc::new(Mutex::new(String::new())));
+        let _pid_clone = pid;
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    if let Ok(mut buf) = output_buffer.lock() {
+                        buf.push_str(&line);
+                        buf.push('\n');
+                    }
+                }
+            }
+        });
+    }
+
+    Ok(pid)
+}
+
+/// Start LocalAI runtime
+async fn start_localai_runtime() -> Result<u32, String> {
+    let output = Command::new("local-ai")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start LocalAI: {}", e))?;
+
+    let pid = output.id();
+    
+    let process_info = ProcessInfo {
+        pid,
+        tool_id: "localai".to_string(),
+        working_dir: String::new(),
+        status: ProcessStatus::Running,
+    };
+
+    let mut registry = process_registry().lock().map_err(|e| e.to_string())?;
+    registry.insert(pid, process_info);
+
+    Ok(pid)
+}
+
+/// Start Docker container
+async fn start_docker_runtime(container_id: &str) -> Result<u32, String> {
+    let output = Command::new("docker")
+        .args(&["start", container_id])
+        .output()
+        .map_err(|e| format!("Failed to start Docker container: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Docker start failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    // Return a pseudo-PID for Docker containers
+    Ok(container_id.bytes().fold(0u32, |acc, b| acc.wrapping_add(b as u32)))
+}
+
+/// Start generic runtime
+async fn start_generic_runtime(
+    executable_path: String,
+    args: Vec<String>,
+    working_dir: Option<String>,
+) -> Result<u32, String> {
+    let mut command = Command::new(&executable_path);
+    command.args(&args);
+    
+    if let Some(dir) = working_dir {
+        command.current_dir(dir);
+    }
+
+    let output = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start process: {}", e))?;
+
+    let pid = output.id();
+    
+    let process_info = ProcessInfo {
+        pid,
+        tool_id: executable_path,
+        working_dir: String::new(),
+        status: ProcessStatus::Running,
+    };
+
+    let mut registry = process_registry().lock().map_err(|e| e.to_string())?;
+    registry.insert(pid, process_info);
+
+    Ok(pid)
+}
+
+/// Stop a runtime process
+#[tauri::command]
+pub async fn stop_runtime(runtime_id: String) -> Result<(), String> {
+    let parts: Vec<&str> = runtime_id.split('_').collect();
+    if parts.is_empty() {
+        return Err("Invalid runtime ID".to_string());
+    }
+
+    let runtime_type = parts[0];
+
+    match runtime_type {
+        "docker" => {
+            if parts.len() >= 2 {
+                stop_docker_runtime(parts[1]).await
+            } else {
+                Err("Invalid Docker runtime ID".to_string())
+            }
+        }
+        _ => {
+            // For other runtimes, we need to find the PID
+            // This is a simplified implementation
+            Err("Stopping non-Docker runtimes not yet implemented".to_string())
+        }
+    }
+}
+
+/// Stop Docker container
+async fn stop_docker_runtime(container_id: &str) -> Result<(), String> {
+    let output = Command::new("docker")
+        .args(&["stop", container_id])
+        .output()
+        .map_err(|e| format!("Failed to stop Docker container: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Docker stop failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
+/// Restart a runtime process
+#[tauri::command]
+pub async fn restart_runtime(runtime_id: String) -> Result<u32, String> {
+    // Stop the runtime first
+    if let Err(e) = stop_runtime(runtime_id.clone()).await {
+        // If stop fails, it might already be stopped, continue anyway
+        eprintln!("Warning: stop failed: {}", e);
+    }
+
+    // Wait a bit for cleanup
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    // Start it again
+    start_runtime(runtime_id, String::new(), vec![], None).await
+}
+
+/// Stream process output (placeholder for event-based streaming)
+#[tauri::command]
+pub async fn stream_process_output(pid: u32) -> Result<Vec<String>, String> {
+    let output = process_output().lock().map_err(|e| e.to_string())?;
+    
+    if let Some(buf) = output.get(&pid) {
+        Ok(buf.lines().map(|s| s.to_string()).collect())
+    } else {
+        Ok(vec![])
+    }
 }
 
 #[cfg(test)]
@@ -129,3 +353,7 @@ mod tests {
         assert_eq!(json, "\"Running\"");
     }
 }
+
+#[cfg(test)]
+#[path = "process_test.rs"]
+mod process_test;

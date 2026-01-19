@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import type { PromptTemplate, ThemeMode } from '@/types';
+import { loadSettings, saveSettings, type SettingsData } from '@/utils/store';
 
 export const useSettingsStore = defineStore('settings', () => {
   // State
@@ -9,11 +10,36 @@ export const useSettingsStore = defineStore('settings', () => {
   const editorFontSize = ref<number>(14);
   const autoSave = ref<boolean>(true);
   const promptTemplates = ref<PromptTemplate[]>([]);
+  const panelSizes = ref({
+    navigation: 250,
+    main: 600,
+    context: 300,
+  });
+  const keyboardShortcuts = ref<Record<string, string>>({
+    new_session: 'Ctrl+N',
+    search: 'Ctrl+F',
+    command_palette: 'Ctrl+K',
+  });
+  const tokenLimits = ref<Record<string, number>>({
+    'gpt-4': 8192,
+    'gpt-3.5-turbo': 4096,
+  });
 
   // Watch theme changes and apply to document
   watch(theme, (newTheme) => {
     applyTheme(newTheme);
   }, { immediate: true });
+
+  // Auto-save settings when they change
+  watch(
+    [theme, language, editorFontSize, autoSave, panelSizes, keyboardShortcuts, tokenLimits],
+    async () => {
+      if (autoSave.value) {
+        await persistSettings();
+      }
+    },
+    { deep: true }
+  );
 
   // Actions
   function setTheme(newTheme: ThemeMode): void {
@@ -43,6 +69,18 @@ export const useSettingsStore = defineStore('settings', () => {
     autoSave.value = enabled;
   }
 
+  function setPanelSizes(sizes: { navigation: number; main: number; context: number }): void {
+    panelSizes.value = sizes;
+  }
+
+  function setKeyboardShortcut(action: string, shortcut: string): void {
+    keyboardShortcuts.value[action] = shortcut;
+  }
+
+  function setTokenLimit(modelType: string, limit: number): void {
+    tokenLimits.value[modelType] = limit;
+  }
+
   function addPromptTemplate(template: PromptTemplate): void {
     const existing = promptTemplates.value.findIndex(t => t.id === template.id);
     if (existing >= 0) {
@@ -65,6 +103,40 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   // Persistence
+  async function loadFromStore(): Promise<void> {
+    try {
+      const data = await loadSettings();
+      theme.value = data.theme as ThemeMode;
+      language.value = data.language;
+      editorFontSize.value = data.editorFontSize;
+      autoSave.value = data.autoSave;
+      panelSizes.value = data.panelSizes;
+      keyboardShortcuts.value = data.keyboardShortcuts;
+      tokenLimits.value = data.tokenLimits;
+    } catch (error) {
+      console.error('Failed to load settings from store:', error);
+    }
+  }
+
+  async function persistSettings(): Promise<void> {
+    try {
+      const data: SettingsData = {
+        version: 1,
+        theme: theme.value,
+        language: language.value,
+        editorFontSize: editorFontSize.value,
+        autoSave: autoSave.value,
+        panelSizes: panelSizes.value,
+        keyboardShortcuts: keyboardShortcuts.value,
+        tokenLimits: tokenLimits.value,
+      };
+      await saveSettings(data);
+    } catch (error) {
+      console.error('Failed to persist settings:', error);
+    }
+  }
+
+  // Legacy methods for backward compatibility
   function loadFromStorage(data: {
     theme?: ThemeMode;
     language?: string;
@@ -102,16 +174,24 @@ export const useSettingsStore = defineStore('settings', () => {
     editorFontSize,
     autoSave,
     promptTemplates,
+    panelSizes,
+    keyboardShortcuts,
+    tokenLimits,
     // Actions
     setTheme,
     applyTheme,
     setLanguage,
     setEditorFontSize,
     setAutoSave,
+    setPanelSizes,
+    setKeyboardShortcut,
+    setTokenLimit,
     addPromptTemplate,
     removePromptTemplate,
     getPromptTemplate,
     getTemplatesByModel,
+    loadFromStore,
+    persistSettings,
     loadFromStorage,
     toStorageData,
   };

@@ -13,9 +13,19 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/ProjectView.vue'),
   },
   {
+    path: '/runtime',
+    name: 'runtime',
+    component: () => import('@/views/RuntimeManagerView.vue'),
+  },
+  {
     path: '/settings',
     name: 'settings',
     component: () => import('@/views/SettingsView.vue'),
+  },
+  {
+    path: '/conversation',
+    name: 'conversation',
+    component: () => import('@/views/ConversationView.vue'),
   },
 ];
 
